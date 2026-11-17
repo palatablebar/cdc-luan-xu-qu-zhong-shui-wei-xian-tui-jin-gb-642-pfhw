@@ -1,0 +1,8 @@
+# cdc-export v1 rows=5 charset=utf-8 导出=夜间补数
+table,pk,version,op,event_time,schema,ref_no,amt,st
+orders,1101,1,upsert,2026-11-15T08:10:30Z,v1,1101,"1,200.50",新建
+orders,1101,2,upsert,2026-11-15T08:12:30Z,v1,1101,"1,200.50",已支付
+table,pk,version,op,event_time,schema,ref_no,amt,st
+orders,1102,1,upsert,2026-11-15T08:14:30Z,v1,1102,300.00,新建,EXTRA
+orders,1103,1,upsert,2026-11-15T08:16:30Z,v1,1103,40.00,新建
+payments,3002,1,upsert,2026-11-15T08:18:30Z,v1,3002,0.00,未支付

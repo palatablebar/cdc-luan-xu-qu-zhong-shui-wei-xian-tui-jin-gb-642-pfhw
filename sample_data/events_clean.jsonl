@@ -1,0 +1,4 @@
+# cdc-export v2 rows=3 charset=utf-8 来源=干净样例
+{"table":"orders","pk":"2001","version":1,"op":"upsert","event_time":"2026-11-15T08:30:00Z","schema":"v2","payload":{"status":"新建","amount":"10.00"}}
+{"table":"customers","pk":"2100","version":1,"op":"upsert","event_time":"2026-11-15T08:35:00Z","schema":"v2","payload":{"status":"活跃","amount":"0.00"}}
+{"table":"orders","pk":"2001","version":2,"op":"upsert","event_time":"2026-11-15T08:50:00Z","schema":"v2","payload":{"status":"已支付","amount":"10.00"}}

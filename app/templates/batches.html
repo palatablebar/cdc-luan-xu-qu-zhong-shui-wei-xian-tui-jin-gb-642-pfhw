@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>批次</h1>
+    <p class="panel-sub">{{ batches | length }} 个 · 水位 {{ stored_watermark | localdt }}</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="tl" style="padding:6px 14px 22px">
+      <div class="tl-lane" id="batch-lane">
+        <div class="tl-axis"></div>
+        {% for tick in ticks %}
+        <span class="tl-event{% if tick.status != 'done' %} is-late{% endif %}"
+              style="left: {{ (loop.index0 * 100 / (ticks | length or 1)) + 2 }}%"
+              title="{{ tick.batch_id }} · {{ tick.applied }} 已应用"></span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid" data-sortable>
+        <thead>
+          <tr><th>批次</th><th>运行号</th><th>来源</th><th>水位</th><th class="num">已应用</th><th class="num">重复</th><th class="num">冲突</th><th class="num">隔离</th><th class="num">迟到</th><th class="num">快照键</th><th>对账</th><th>输入摘要</th></tr>
+        </thead>
+        <tbody>
+          {% for row in batches %}
+          <tr class="{% if batch and row.batch_id == batch.batch_id %}{% else %}is-dim{% endif %}">
+            <td class="mono">{{ row.batch_id }}</td>
+            <td class="mono ellipsis" title="{{ row.run_id }}">{{ row.run_id | masked(18) }}</td>
+            <td>{{ row.source }}</td>
+            <td class="mono nowrap">{{ row.watermark_utc | localdt }}</td>
+            <td class="num">{{ row.counters.applied | num }}</td>
+            <td class="num">{{ row.counters.duplicates | num }}</td>
+            <td class="num">{{ row.counters.conflicts | num }}</td>
+            <td class="num">{{ row.counters.quarantine | num }}</td>
+            <td class="num">{{ row.counters.late_events | num }}</td>
+            <td class="num">{{ row.counters.snapshot_keys | num }}</td>
+            <td><span class="balance {% if not row.reconcile_ok %}is-bad{% endif %}">{{ "平" if row.reconcile_ok else "不平" }}</span></td>
+            <td class="mono">{{ row.input_digest | short }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not batches %}<p class="empty">还没有批次。</p>{% endif %}
+  </div>
+</section>
+
+<div class="split-even">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>当前批次</h2>
+      <p class="panel-sub">{{ plan.code or "—" }}</p>
+    </div>
+    <div class="panel-body">
+      {% if batch %}
+      <dl class="kv">
+        <dt>批次</dt><dd>{{ batch.batch_id }}</dd>
+        <dt>运行号</dt><dd>{{ batch.run_id }}</dd>
+        <dt>批次键</dt><dd>{{ batch.batch_key }}</dd>
+        <dt>输入摘要</dt><dd>{{ batch.input_digest }}</dd>
+        <dt>水位</dt><dd>{{ batch.watermark_utc | localdt }}</dd>
+        <dt>最大事件</dt><dd>{{ batch.max_event_time | localdt }}</dd>
+        <dt>创建</dt><dd>{{ batch.created_at | localdt }}</dd>
+        <dt>完成</dt><dd>{{ batch.finished_at | localdt }}</dd>
+      </dl>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn btn-primary" id="btn-resume" type="button" data-batch="{{ batch.batch_id }}">续跑</button>
+        <a class="btn" href="/api/batches/{{ batch.batch_id }}/manifest">运行清单</a>
+      </div>
+      <p class="hint" id="resume-hint">{{ plan.reason }}</p>
+      {% else %}
+      <p class="empty">还没有批次。</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>输入文件</h2>
+      <p class="panel-sub">{{ (manifest.inputs | length) if manifest else 0 }} 个</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>文件</th><th class="num">行</th><th class="num">字节</th><th>编码</th><th>sha256</th></tr></thead>
+          <tbody>
+            {% for item in (manifest.inputs if manifest else []) %}
+            <tr>
+              <td class="mono">{{ item.name }}</td>
+              <td class="num">{{ item.lines | num }}</td>
+              <td class="num">{{ item.bytes | num }}</td>
+              <td class="mono">{{ item.encoding or '—' }}</td>
+              <td class="mono">{{ item.sha256 | short }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if not manifest %}<p class="empty">还没有运行清单。</p>{% endif %}
+    </div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>阶段</h2>
+    <p class="panel-sub">{{ stages | length }} 个</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>阶段</th><th class="num">进</th><th class="num">出</th><th class="num">隔离</th><th>状态</th><th class="num">耗时(ms)</th><th>备注</th></tr></thead>
+        <tbody>
+          {% for s in stages %}
+          <tr>
+            <td>{{ s.label }}</td>
+            <td class="num">{{ s.in_count | num }}</td>
+            <td class="num">{{ s.out_count | num }}</td>
+            <td class="num">{{ s.quarantine_count | num }}</td>
+            <td><span class="state state-{{ 'applied' if s.status == 'ok' else 'conflict' }}">{{ s.status | status }}</span></td>
+            <td class="num">{{ s.elapsed_ms | num }}</td>
+            <td class="ellipsis" title="{{ s.note }}">{{ s.note or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not stages %}<p class="empty">还没有阶段记录。</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>导出</h2>
+    <p class="panel-sub">证据与清单</p>
+  </div>
+  <div class="panel-body">
+    <div class="actions">
+      <a class="btn" href="/api/export/events.csv">事件证据</a>
+      <a class="btn" href="/api/export/quarantine.csv">隔离区</a>
+      <a class="btn" href="/api/export/conflicts.csv">冲突表</a>
+      <a class="btn" href="/api/export/snapshot.csv">快照</a>
+      <a class="btn" href="/api/export/snapshot.json">快照 JSON</a>
+      <a class="btn" href="/api/export/manifest.json">运行清单</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

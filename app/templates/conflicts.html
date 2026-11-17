@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>冲突与隔离</h1>
+    <p class="panel-sub">{{ conflicts | length }} 冲突 · {{ quarantine | length }} 隔离 · {{ duplicates | length }} 重复</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th class="num">优先级</th><th>分桶</th><th>判定</th></tr></thead>
+        <tbody>
+          {% for row in priority %}
+          <tr><td class="num">{{ row.rank }}</td><td class="mono">{{ row.bucket }}</td><td>{{ row.label }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>版本冲突与复活</h2>
+    <p class="panel-sub">{{ groups | length }} 组</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>键</th><th class="num">版本</th><th class="num">条数</th><th>差异</th><th>证据行</th><th>原因码</th></tr></thead>
+        <tbody>
+          {% for row in groups %}
+          <tr>
+            <td class="mono">{{ row.key }}</td>
+            <td class="num">{{ row.version }}</td>
+            <td class="num">{{ row.count }}</td>
+            <td class="ellipsis" title="{{ row.diff }}">{{ row.diff }}</td>
+            <td class="mono ellipsis" title="{{ row.refs | join(', ') }}">{{ row.refs | join(", ") }}</td>
+            <td class="nowrap"><code class="code is-error">{{ row.code }}</code></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not groups %}<p class="empty">没有冲突分组。</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>冲突行</h2>
+    <p class="panel-sub">{{ conflicts | length }} 行</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid" data-sortable>
+        <thead><tr><th>行号引用</th><th>表</th><th>主键</th><th class="num">版本</th><th>操作</th><th>事件时间</th><th>原因码</th><th>明细</th></tr></thead>
+        <tbody>
+          {% for row in conflicts %}
+          <tr>
+            <td class="mono nowrap">{{ row.row_ref }}</td>
+            <td>{{ row.table_name }}</td>
+            <td class="mono">{{ row.pk }}</td>
+            <td class="num">{{ row.version }}</td>
+            <td>{{ row.op }}</td>
+            <td class="mono nowrap">{{ row.event_time_utc | localdt }}</td>
+            <td class="nowrap"><code class="code is-{{ row.reason_code | level }}">{{ row.reason_code }}</code></td>
+            <td class="ellipsis" title="{{ row.detail }}">{{ row.detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not conflicts %}<p class="empty">没有冲突行。</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>隔离区</h2>
+    <p class="panel-sub">{{ quarantine | length }} 行 · 可导出</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid" data-sortable>
+        <thead><tr><th>行号引用</th><th>表</th><th>主键</th><th>字段</th><th>原值</th><th>原因码</th><th>明细</th></tr></thead>
+        <tbody>
+          {% for row in quarantine %}
+          <tr>
+            <td class="mono nowrap">{{ row.row_ref }}</td>
+            <td>{{ row.table_name or '—' }}</td>
+            <td class="mono">{{ row.pk or '—' }}</td>
+            <td class="mono">{{ row.field or '—' }}</td>
+            <td class="mono ellipsis" title="{{ row.raw_value }}">{{ row.raw_value or '—' }}</td>
+            <td class="nowrap"><code class="code is-{{ row.reason_code | level }}">{{ row.reason_code }}</code></td>
+            <td class="ellipsis" title="{{ row.detail }}">{{ row.detail or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not quarantine %}<p class="empty">没有隔离行。</p>{% endif %}
+  </div>
+  <div class="panel-body">
+    <div class="actions">
+      <a class="btn" href="/api/export/quarantine.csv">导出隔离 CSV</a>
+      <a class="btn" href="/api/export/conflicts.csv">导出冲突 CSV</a>
+    </div>
+  </div>
+</section>
+
+<div class="split-even">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>重复分组</h2>
+      <p class="panel-sub">{{ dup_groups | length }} 组</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>键</th><th class="num">到达次数</th><th>证据行</th><th>原因码</th></tr></thead>
+          <tbody>
+            {% for row in dup_groups %}
+            <tr>
+              <td class="mono">{{ row.key }}</td>
+              <td class="num">{{ row.count }}</td>
+              <td class="mono ellipsis" title="{{ row.refs | join(', ') }}">{{ row.refs | join(", ") }}</td>
+              <td><code class="code is-warn">{{ row.code }}</code></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if not dup_groups %}<p class="empty">没有重复分组。</p>{% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>原因码条数</h2>
+      <p class="panel-sub">{{ distribution | length }} 个码</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid" data-sortable>
+          <thead><tr><th>原因码</th><th>级别</th><th>结论</th><th class="num">条数</th></tr></thead>
+          <tbody>
+            {% for row in distribution %}
+            <tr>
+              <td class="mono">{{ row.code }}</td>
+              <td>{{ row.level | level }}</td>
+              <td class="ellipsis" title="{{ row.label }}">{{ row.label }}</td>
+              <td class="num">{{ row.count | num }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

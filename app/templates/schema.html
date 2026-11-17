@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="split-even">
+  <section class="panel">
+    <div class="panel-head">
+      <h1>契约</h1>
+      <p class="panel-sub">{{ contract.tables | length }} 表 · {{ field_rows | length }} 字段</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>旧列名</th><th>中文名</th></tr></thead>
+          <tbody>
+            {% for row in field_rows %}
+            <tr>
+              <td class="mono">{{ row.name }}</td>
+              <td>{{ row.type }}</td>
+              <td>{{ "必填" if row.required else "可空" }}</td>
+              <td class="mono">{{ row.aliases }}</td>
+              <td>{{ row.label }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>版本</h2>
+      <p class="panel-sub">{{ contract.schemas | length }} 个</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>版本</th><th>起始</th><th>输出列名</th><th>备注</th></tr></thead>
+          <tbody>
+            {% for row in contract.schemas %}
+            <tr>
+              <td class="mono">{{ row.label }}</td>
+              <td class="mono">{{ row.since }}</td>
+              <td class="mono">{{ row.emitted | join(", ") if row.emitted else "规范列名" }}</td>
+              <td>{{ row.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>列名映射</h2>
+    <p class="panel-sub">{{ alias_rows | length }} 条</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>旧列名</th><th>规范列名</th><th>来源版本</th><th>中文名</th></tr></thead>
+        <tbody>
+          {% for row in alias_rows %}
+          <tr><td class="mono">{{ row.alias }}</td><td class="mono">{{ row.target }}</td><td>{{ row.origin }}</td><td>{{ row.target_label }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>试归一</h2>
+    <p class="panel-sub" id="preview-state">粘贴一条事件</p>
+  </div>
+  <div class="panel-body">
+    <textarea id="preview-input" spellcheck="false" style="min-height:150px">{{ preview_sample | tojson(indent=2) }}</textarea>
+    <div class="actions" style="margin-top:8px">
+      <button class="btn btn-primary" id="btn-preview" type="button">归一</button>
+      <span class="hint" id="preview-hint">按当前契约解析</span>
+    </div>
+    <div class="table-wrap" style="margin-top:10px">
+      <table class="grid" id="preview-table">
+        <thead><tr><th>字段</th><th>值</th></tr></thead>
+        <tbody>
+          {% for key, value in preview_result.payload.items() if key != "amount" %}
+          <tr><td class="mono">{{ key }}</td><td class="mono">{{ value }}</td></tr>
+          {% endfor %}
+          <tr><td class="mono">amount</td><td class="mono">{{ preview_result.amount or '—' }}</td></tr>
+          <tr><td class="mono">event_time</td><td class="mono">{{ preview_result.event_time or '—' }}</td></tr>
+          <tr><td class="mono">codes</td><td class="mono">{{ preview_result.codes | join(", ") if preview_result.codes else "无" }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>原因码分布</h2>
+    <p class="panel-sub">{{ distribution | length }} 个码</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid" data-sortable>
+        <thead><tr><th>原因码</th><th>级别</th><th>阶段</th><th>结论</th><th class="num">条数</th></tr></thead>
+        <tbody>
+          {% for row in distribution %}
+          <tr>
+            <td class="mono">{{ row.code }}</td>
+            <td>{{ row.level | level }}</td>
+            <td>{{ stage_labels[row.stage] if row.stage in stage_labels else row.stage }}</td>
+            <td>{{ row.label }}</td>
+            <td class="num">{{ row.count | num }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not distribution %}<p class="empty">还没有原因码。</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>登记表</h2>
+    <p class="panel-sub">{{ contract.tables | length }} 张</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>表</th><th>中文名</th><th>主键</th></tr></thead>
+        <tbody>
+          {% for row in contract.tables %}
+          <tr><td class="mono">{{ row.name }}</td><td>{{ row.label }}</td><td>{{ row.pk }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

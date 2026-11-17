@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    image: cdcwater:local
+    environment:
+      CDCWATER_DB: /data/cdcwater.sqlite
+      CDCWATER_SAMPLE_DIR: /app/sample_data
+      CDCWATER_LATE_WINDOW: "10"
+      CDCWATER_SEED: "${CDCWATER_SEED:-1}"
+      TZ: Asia/Shanghai
+    ports:
+      - "18201:8000"
+    volumes:
+      - cdcwater-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://127.0.0.1:8000/api/health', timeout=2.0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 8s
+
+volumes:
+  cdcwater-data:

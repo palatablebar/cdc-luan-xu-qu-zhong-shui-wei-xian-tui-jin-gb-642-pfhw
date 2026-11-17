@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>水位时间轴</h1>
+    <p class="panel-sub">{{ totals.applied | num }} 已应用 · {{ totals.late_events | num }} 迟到</p>
+  </div>
+  <div class="panel-body">
+    <div class="actions">
+      <label class="field">
+        <span>来源</span>
+        <select id="source-select">
+          {% for key in source_keys %}
+          <option value="{{ key }}">{{ source_labels[key] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn btn-primary" id="btn-import" type="button">采信</button>
+      <button class="btn" id="btn-rerun" type="button"
+              {% if not batch %}disabled{% endif %}>重跑</button>
+      <a class="btn btn-ghost" id="btn-manifest" href="/api/export/manifest.json">清单</a>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>运行刻度</h2>
+    <p class="panel-sub">as_of {{ watermark.final | localdt }}</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="tl" id="timeline" data-late="{{ late_window }}"></div>
+    <div class="tl-legend">
+      <span><i></i>已应用</span>
+      <span><i class="is-late"></i>迟到</span>
+      <span><i class="is-pending"></i>待定</span>
+      <span><i class="is-mark"></i>水位线</span>
+    </div>
+  </div>
+  <script type="application/json" id="timeline-data">{{ timeline_json | safe }}</script>
+</section>
+
+<div class="split">
+  <aside class="rail" aria-label="运行计数">
+    <dl>
+      <div class="row"><dt class="key">原始行</dt><dd class="value">{{ totals.raw_lines | num }}</dd></div>
+      <div class="row"><dt class="key">已应用</dt><dd class="value is-ok">{{ totals.applied | num }}</dd></div>
+      <div class="row"><dt class="key">重复</dt><dd class="value">{{ totals.duplicates | num }}</dd></div>
+      <div class="row"><dt class="key">冲突</dt><dd class="value is-bad">{{ totals.conflicts | num }}</dd></div>
+      <div class="row"><dt class="key">隔离</dt><dd class="value is-bad">{{ totals.quarantine | num }}</dd></div>
+      <div class="row"><dt class="key">迟到</dt><dd class="value is-warn">{{ totals.late_events | num }}</dd></div>
+      <div class="row"><dt class="key">快照键</dt><dd class="value">{{ totals.snapshot_keys | num }}</dd></div>
+      <div class="row"><dt class="key">墓碑</dt><dd class="value is-bad">{{ totals.tombstone_keys | num }}</dd></div>
+      <div class="row"><dt class="key">待定键</dt><dd class="value is-warn">{{ totals.pending_only_keys | num }}</dd></div>
+      <div class="row"><dt class="key">快照金额</dt><dd class="value">{{ totals.amount_snapshot | dec }}</dd></div>
+    </dl>
+  </aside>
+
+  <div class="stack">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>水位</h2>
+        <p class="panel-sub">最大事件 {{ watermark.max_event_time | localdt }}</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid" data-sortable>
+            <thead>
+              <tr><th>项</th><th>值</th><th class="no-sort">区间</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>水位线</td><td class="mono">{{ watermark.final | localdt }}</td><td>末次推进</td></tr>
+              <tr><td>最大事件时间</td><td class="mono">{{ watermark.max_event_time | localdt }}</td><td>已应用</td></tr>
+              <tr><td>迟到条数</td><td class="num">{{ totals.late_events | num }}</td><td>event_time &lt; 水位线</td></tr>
+              <tr><td>最晚落后</td><td class="num">{{ totals.max_behind_minutes | num }} 分钟</td><td>迟到窗口 {{ late_window }} 分钟</td></tr>
+              {% for row in window_rows %}
+              <tr class="is-dim"><td>{{ row.name }}</td><td class="mono">{{ row.expr }}</td><td>{{ row.side }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>对账</h2>
+        <p class="panel-sub">{{ "平" if totals.reconcile_ok == "1" else "不平" }}</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid">
+            <thead>
+              <tr><th>账</th><th>左</th><th class="num">值</th><th>右</th><th class="num">值</th></tr>
+            </thead>
+            <tbody>
+              {% for row in reconcile %}
+              <tr>
+                <td>{{ row.name }}</td>
+                <td>{{ row.left }}</td>
+                <td class="num">{{ (row.left_value | num) if row.kind == "count" else (row.left_value | dec) }}</td>
+                <td>{{ row.right }}</td>
+                <td class="num"><span class="balance {% if not row.ok %}is-bad{% endif %}">{{ (row.right_value | num) if row.kind == "count" else (row.right_value | dec) }}</span></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>近期事件</h2>
+        <p class="panel-sub">{{ total_events | num }} 行 · 显示 {{ events | length }}</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid">
+            <thead>
+              <tr><th>行号引用</th><th>键</th><th class="num">版本</th><th>操作</th><th>事件时间</th><th>分类</th><th>原因码</th><th class="num">金额</th></tr>
+            </thead>
+            <tbody>
+              {% for e in events %}
+              <tr>
+                <td class="mono">{{ e.row_ref }}</td>
+                <td class="mono">{{ e.table_name }}/{{ e.pk }}</td>
+                <td class="num">{{ e.version or '—' }}</td>
+                <td>{{ e.op or '—' }}</td>
+                <td class="mono">{{ e.event_time_utc | localdt }}</td>
+                <td><span class="state state-{{ e.row_class }}">{{ e.row_class | state }}</span></td>
+                <td>{% if e.reason_code %}<code class="code is-{{ e.reason_code | level }}">{{ e.reason_code }}</code>{% else %}—{% endif %}</td>
+                <td class="num">{{ e.amount | dec }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if not events %}<p class="empty">还没有事件。</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>迟到事件</h2>
+        <p class="panel-sub">{{ late_rows | length }} 条</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid">
+            <thead>
+              <tr><th>行号引用</th><th>事件时间</th><th>水位线</th><th class="num">落后</th></tr>
+            </thead>
+            <tbody>
+              {% for row in late_rows %}
+              <tr>
+                <td class="mono">{{ row.row_ref }}</td>
+                <td class="mono">{{ row.event_time | localdt }}</td>
+                <td class="mono">{{ row.watermark | localdt }}</td>
+                <td class="num">{{ row.behind_text }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if not late_rows %}<p class="empty">没有迟到事件。</p>{% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

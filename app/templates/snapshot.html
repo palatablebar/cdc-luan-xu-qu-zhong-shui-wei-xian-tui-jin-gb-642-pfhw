@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>快照</h1>
+    <p class="panel-sub">as_of {{ summary.as_of | localdt }} · {{ summary.snapshot_keys | num }} 键</p>
+  </div>
+  <div class="panel-body">
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-snapshot" type="button">物化</button>
+      <a class="btn" href="/api/export/snapshot.csv">导出 CSV</a>
+      <a class="btn" href="/api/export/snapshot.json">导出 JSON</a>
+      <span class="hint" id="snapshot-hint">同一 as_of 重算行数不变</span>
+    </div>
+  </div>
+</section>
+
+<div class="split">
+  <aside class="rail" aria-label="快照计数">
+    <dl>
+      <div class="row"><dt class="key">已应用键</dt><dd class="value">{{ summary.keys_total | num }}</dd></div>
+      <div class="row"><dt class="key">快照键</dt><dd class="value">{{ summary.snapshot_keys | num }}</dd></div>
+      <div class="row"><dt class="key">活跃</dt><dd class="value is-ok">{{ summary.active_keys | num }}</dd></div>
+      <div class="row"><dt class="key">墓碑</dt><dd class="value is-bad">{{ summary.tombstone_keys | num }}</dd></div>
+      <div class="row"><dt class="key">待定键</dt><dd class="value is-warn">{{ summary.pending_only | num }}</dd></div>
+      <div class="row"><dt class="key">快照金额</dt><dd class="value">{{ summary.amount_snapshot | dec }}</dd></div>
+      <div class="row"><dt class="key">待定金额</dt><dd class="value is-warn">{{ summary.amount_pending | dec }}</dd></div>
+      <div class="row"><dt class="key">合计金额</dt><dd class="value">{{ summary.amount_applied | dec }}</dd></div>
+    </dl>
+  </aside>
+
+  <div class="stack">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>对账</h2>
+        <p class="panel-sub">{{ window_rows | length }} 个窗口</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr><th>账</th><th>左</th><th class="num">值</th><th>右</th><th class="num">值</th><th>结论</th></tr></thead>
+            <tbody>
+              {% for row in reconcile %}
+              <tr>
+                <td>{{ row.name }}</td>
+                <td>{{ row.left }}</td>
+                <td class="num">{{ (row.left_value | num) if row.kind == "count" else (row.left_value | dec) }}</td>
+                <td>{{ row.right }}</td>
+                <td class="num">{{ (row.right_value | num) if row.kind == "count" else (row.right_value | dec) }}</td>
+                <td><span class="balance {% if not row.ok %}is-bad{% endif %}">{{ "平" if row.ok else "不平" }}</span></td>
+              </tr>
+              {% endfor %}
+              {% for row in window_rows %}
+              <tr class="is-dim"><td>{{ row.side }}</td><td colspan="4" class="mono">{{ row.expr }}</td><td>{{ row.note }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>快照行</h2>
+        <p class="panel-sub">{{ rows | length }} 行</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid" data-sortable>
+            <thead><tr><th>表</th><th>主键</th><th class="num">版本</th><th>状态</th><th class="num">金额(元)</th><th class="num">数量</th><th>事件时间</th><th>行号引用</th><th>迟到</th></tr></thead>
+            <tbody>
+              {% for row in rows %}
+              <tr>
+                <td>{{ row.table }}</td>
+                <td class="mono">{{ row.pk }}</td>
+                <td class="num">{{ row.version }}</td>
+                <td><span class="state state-{{ row.kind }}">{{ row.kind | snap }}</span></td>
+                <td class="num">{{ row.amount | dec }}</td>
+                <td class="num">{{ row.qty if row.qty is not none else '—' }}</td>
+                <td class="mono nowrap">{{ row.event_time | localdt }}</td>
+                <td class="mono nowrap">{{ row.row_ref }}</td>
+                <td>{{ "是" if row.late else "否" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if not rows %}<p class="empty">还没有快照。</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>待定窗口</h2>
+        <p class="panel-sub">{{ pending | length }} 键</p>
+      </div>
+      <div class="panel-body tight">
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr><th>键</th><th class="num">版本</th><th class="num">金额</th><th>事件时间</th><th>行号引用</th><th class="num">待定事件</th></tr></thead>
+            <tbody>
+              {% for row in pending %}
+              <tr>
+                <td class="mono">{{ row.key }}</td>
+                <td class="num">{{ row.version }}</td>
+                <td class="num">{{ row.amount | dec }}</td>
+                <td class="mono nowrap">{{ row.event_time | localdt }}</td>
+                <td class="mono nowrap">{{ row.row_ref }}</td>
+                <td class="num">{{ row.pending_events }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if not pending %}<p class="empty">没有待定键。</p>{% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

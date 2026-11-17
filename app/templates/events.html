@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>事件流</h1>
+    <p class="panel-sub">{{ events | length }} / {{ total_events | num }} 行</p>
+  </div>
+  <div class="panel-body">
+    <div class="chips">
+      <a href="/events" {% if not row_class %}aria-current="true"{% endif %}>全部</a>
+      {% for key, label in row_class_labels.items() %}
+      <a href="/events?row_class={{ key }}" {% if row_class == key %}aria-current="true"{% endif %}>{{ label }}</a>
+      {% endfor %}
+      {% for name in table_list %}
+      <a href="/events?table={{ name }}" {% if table == name %}aria-current="true"{% endif %}>{{ name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid" data-sortable>
+        <thead>
+          <tr>
+            <th>#</th><th>行号引用</th><th>表</th><th>主键</th><th class="num">版本</th>
+            <th>操作</th><th>事件时间</th><th>原始时间</th><th>schema</th>
+            <th>分类</th><th>原因码</th><th class="num">金额(元)</th><th class="num">数量</th><th>迟到</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in events %}
+          <tr>
+            <td class="seq">{{ e.seq }}</td>
+            <td class="mono nowrap">{{ e.row_ref }}</td>
+            <td>{{ e.table_name or '—' }}</td>
+            <td class="mono">{{ e.pk or '—' }}</td>
+            <td class="num">{{ e.version if e.version is not none else '—' }}</td>
+            <td>{{ e.op or '—' }}</td>
+            <td class="mono nowrap">{{ e.event_time_utc | localdt }}</td>
+            <td class="mono nowrap">{{ e.event_time_raw or '—' }}</td>
+            <td class="mono">{{ e.schema_version or '—' }}</td>
+            <td><span class="state state-{{ e.row_class }}">{{ e.row_class | state }}</span></td>
+            <td class="nowrap">{% if e.reason_code %}<code class="code is-{{ e.reason_code | level }}">{{ e.reason_code }}</code>{% else %}—{% endif %}</td>
+            <td class="num">{{ e.amount | dec }}</td>
+            <td class="num">{{ e.qty if e.qty is not none else '—' }}</td>
+            <td>{{ "是" if e.late else "否" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not events %}<p class="empty">该筛选下没有事件。</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>输入文件</h2>
+    <p class="panel-sub">{{ inputs | length }} 个</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr><th>文件</th><th>格式</th><th>编码</th><th>声明编码</th><th class="num">字节</th><th class="num">行</th><th class="num">声明行数</th><th>状态</th><th>原因码</th><th>摘要</th></tr>
+        </thead>
+        <tbody>
+          {% for f in inputs %}
+          <tr>
+            <td class="mono">{{ f.name }}</td>
+            <td>{{ f.kind }}</td>
+            <td class="mono">{{ f.encoding or '—' }}</td>
+            <td class="mono">{{ f.declared or '—' }}</td>
+            <td class="num">{{ f.bytes | num }}</td>
+            <td class="num">{{ f.lines | num }}</td>
+            <td class="num">{{ f.declared_rows if f.declared_rows is not none else '—' }}</td>
+            <td>{{ f.status }}</td>
+            <td class="nowrap">{% if f.code %}<code class="code is-{{ f.code | level }}">{{ f.code }}</code>{% else %}—{% endif %}</td>
+            <td class="mono ellipsis" title="{{ f.sha256 }}">{{ f.sha256 | short }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not inputs %}<p class="empty">还没有输入文件。</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

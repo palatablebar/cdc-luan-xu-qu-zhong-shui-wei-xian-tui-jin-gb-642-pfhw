@@ -1,0 +1,46 @@
+{
+  "contract_version": "2026-11-15",
+  "tables": [
+    "orders",
+    "order_items",
+    "customers",
+    "payments",
+    "shipments",
+    "products",
+    "inventory",
+    "refunds"
+  ],
+  "fields": {
+    "ref": {
+      "type": "string",
+      "required": false
+    },
+    "status": {
+      "type": "string",
+      "required": true
+    },
+    "amount": {
+      "type": "decimal",
+      "required": false,
+      "scale": "0.01"
+    },
+    "qty": {
+      "type": "int",
+      "required": false
+    }
+  },
+  "aliases": {
+    "ref_no": "ref",
+    "amt": "amount",
+    "st": "status",
+    "qt": "qty"
+  },
+  "schemas": [
+    "v1",
+    "v2"
+  ],
+  "window": {
+    "late_minutes": 10,
+    "snapshot": "event_time <= as_of"
+  }
+}

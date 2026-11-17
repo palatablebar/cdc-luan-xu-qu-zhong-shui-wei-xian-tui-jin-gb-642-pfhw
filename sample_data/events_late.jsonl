@@ -1,0 +1,5 @@
+# cdc-export v2 rows=4 charset=utf-8 来源=补数导出
+{"table":"orders","pk":"1009","version":1,"op":"upsert","event_time":"2026-11-15T08:15:00Z","schema":"v2","payload":{"status":"新建","amount":"33.00"}}
+{"table":"orders","pk":"1009","version":2,"op":"upsert","event_time":"2026-11-15T08:16:00Z","schema":"v2","payload":{"status":"已支付","amount":"33.00"}}
+{"table":"inventory","pk":"5001","version":2,"op":"upsert","event_time":"2026-11-15T08:17:00Z","schema":"v2","payload":{"status":"释放","qty":"7"}}
+{"table":"orders","pk":"1104","version":1,"op":"upsert","event_time":"2026-11-15T08:19:00Z","schema":"v2","payload":{"status":"新建","amount":"0.01"}}
