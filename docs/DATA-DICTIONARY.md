@@ -43,21 +43,41 @@
 
 ## 5 水位线与窗口（关键定义）
 
-- **水位线** = 已应用事件的最大 `event_time` − 10 分钟。只由已应用事件推进：重复、冲突、
-  隔离都不推进。
-- **迟到**：`event_time < 水位线` 判迟到（`W_LATE_ARRIVAL`），**但仍然应用**；等于水位线不算迟到。
+- **水位线** = 本批全部已应用事件的最大 `event_time` − 10 分钟。它是批次级标量，只由已应用
+  事件决定：重复、冲突、隔离都不推进，且**与事件到达/接收次序无关**。
+- **迟到（顺序无关口径）**：以本批**最终水位线**为唯一标尺，`event_time < 最终水位线` 判迟到
+  （`W_LATE_ARRIVAL`），**但仍然应用**；等于水位线不算迟到。`behind_seconds` = 最大
+  `event_time` − 本事件 `event_time`。因此同一批业务事实乱序重发时，迟到集合与条数恒定。
 - **快照窗口**：`event_time ≤ as_of`，`as_of` = 本次水位线。含等号一侧。
 - **待定窗口**：`(as_of, +inf)`，半开。两窗口互不重叠、合起来覆盖全部已应用事件。
 - 同一键既有快照内事件、又有待定事件时，快照取 `≤ as_of` 的最大版本，并记 `drift`。
+
+## 5b 批次身份与每行顺序依据（乱序重发裁决）
+
+- **批次身份以业务内容为准，不以物理字节/行序为准**：`content_digest` 按每条采信行的规范化
+  业务内容（信封 + UTC 时刻 + 规范化 payload + 金额；坏行只取其原始文本）排序后 sha256，
+  不含文件名、行号、到达次序、物理字节。`batch_key = sha256(content_digest + rule_version +
+  params)`。上游把同一逻辑批次乱序重发，`content_digest` 与 `batch_id` 恒定，只形成一个可长期
+  复核的结果，页面与导出不会出现两套。
+- 物理文件 `name:字节sha256` 仍记入 `input_digest` 与清单 `inputs[]`，但**只作证据，不参与
+  身份计算**；同一内容换文件名、换字节排布，字节摘要不同、内容摘要相同。
+- **每行双轨顺序依据**：
+  - `arrival_seq`（= `seq`）：本次物理接收次序，仅作证据，不参与任何判定；
+  - `canonical_seq`：按 `event_time → table → pk → version → op → 原始时间文本 → 内容哈希`
+    的确定性规范序，去重首见、水位迟到、版本折叠、快照物化只认规范序。
+  - 行级 JSON 解析失败统一 `E_BAD_JSON`，与该行处于中段还是末行无关；「截断」只由文件级
+    声明条数核对（`E_TAIL_TRUNCATED`）保留，避免原因码随行位置漂移。
 
 ## 6 去重键与冲突
 
 - **去重键** = `(table, pk, version, op, event_time_utc, 规范化 payload)` 的 sha256。
   用规范化 payload（金额两位、字段排序）而不是原始行哈希，所以 `120.5` 与 `120.50`
   视为同一事件；用 UTC 时刻而不是原始字符串，所以两种时区写法视为同一事件。
+  首见保留按 `canonical_seq`，重复行证据引用首条的规范序位次，不随接收次序漂移。
 - **版本冲突** `C_VERSION_CONFLICT`：同键同版本出现两种以上签名 → 整组不应用。
-- **墓碑复活** `C_TOMBSTONE_RESURRECT`：某键存在版本 `d` 的 `delete`，之后到达的 `version < d`
-  的 `upsert` 不应用；删除之前到达的低版本照常应用（会被删除覆盖，结果一致）。
+- **墓碑复活** `C_TOMBSTONE_RESURRECT`：纯版本集合规则——某键存在版本 `d` 的 `delete`，
+  则该键所有 `version < d` 的 `upsert` 一律不应用，不看到达先后。这些低版本本就会被同键
+  高版本墓碑覆盖，折叠/快照结果与「按到达序」口径一致，但判定顺序无关、可复算。
 - **优先级**：`quarantine > conflict > duplicate > apply`，判定由集合运算得出，与遍历顺序无关。
 
 ## 7 空态三态
@@ -85,9 +105,12 @@
 
 ## 9 运行清单字段
 
-`run_id`（`CDC-时间戳-随机`）、`batch_id`（`B-批次键`）、`batch_key`（输入摘要 + 规则版本 +
-参数 的 sha256 前 10 位）、`input_digest`（每个文件 `name:sha256` 的摘要）、`inputs[]`
+`run_id`（`CDC-时间戳-随机`）、`batch_id`（`B-批次键`）、`batch_key`（**业务内容摘要** +
+规则版本 + 参数 的 sha256 前 10 位）、`content_digest`（批次身份依据，与字节/行序无关）、
+`input_digest`（每个文件 `name:字节sha256` 的摘要，仅作物理证据）、`inputs[]`
 （`name/bytes/sha256/lines/encoding/kind/declared_rows/status/code`）、`params`、
-`watermark_utc`、`max_event_time_utc`、`stages[]`、`counters`、`reconcile`。
+`watermark_utc`、`max_event_time_utc`、`stages[]`、`counters`、`reconcile`、
+`identity_basis`、`order_basis`。
 
-同一 `input_digest` 重跑命中同一 `batch_key`，返回原批次、不新增行。
+同一 `content_digest` 重跑（含乱序重发）命中同一 `batch_key`，返回原批次、不新增行、
+不重复累计；失败中断只写 failed 尝试，已完成批次原样保留。

@@ -45,7 +45,9 @@ def timeline(store, batch_id: str) -> dict:
     ticks = []
     for row, event_time, mark in zip(rows, events, marks):
         ticks.append({
-            "seq": row["seq"], "ref": row["row_ref"],
+            "seq": row["seq"],
+            "canonical_seq": row.get("canonical_seq", row["seq"]),
+            "ref": row["row_ref"],
             "event": event_time.isoformat() if event_time else None,
             "mark": mark.isoformat() if mark else None,
             "late": bool(row["late"]),

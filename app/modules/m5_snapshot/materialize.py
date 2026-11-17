@@ -53,7 +53,7 @@ def materialize(applied: list[apply_mod.Applied], as_of) -> Snapshot:
             if not item.tombstone and item.state.amount is not None:
                 pending_amount += item.state.amount
             continue
-        state = sorted(inside, key=lambda e: (e.version, e.seq))[-1]
+        state = sorted(inside, key=lambda e: (e.version, e.canonical_seq or e.seq))[-1]
         if state.op == "delete":
             counters["tombstone_keys"] += 1
             row_amount = None

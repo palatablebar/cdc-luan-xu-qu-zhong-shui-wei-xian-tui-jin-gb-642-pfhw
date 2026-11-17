@@ -1,9 +1,12 @@
 """样例数据的期望值：按事件逐条推算后写死，与实现无关。
 
-推算依据（docs/DATA-DICTIONARY.md 的定义）：
+推算依据（docs/DATA-DICTIONARY.md 的定义，顺序无关口径）：
 
-- 原始行 = 已应用 27 + 重复 2 + 冲突 3 + 隔离 10 = 42；
+- 原始行 = 已应用 24 + 重复 2 + 冲突 6 + 隔离 10 = 42；
 - 水位线 = 最大 event_time(09:02) − 10 分钟 = 08:52；
+- 迟到以批次最终水位 08:52 为唯一标尺：event_time < 08:52 共 22 条（顺序无关）；
+- 墓碑复活是纯版本集合规则：键存在版本 d 的 delete，则 version<d 的 upsert 一律冲突，
+  共 4 条复活 + 2 条版本冲突 = 6；这些行本就被同键高版本墓碑覆盖，最终业务结果不变；
 - 键 19 = 快照键 18 + 待定键 1，快照键 18 = 活跃 16 + 墓碑 2；
 - 金额：快照 1552.51 + 待定 200.00 + 变化 0.00 = 已应用 1752.51（元）。
 """
@@ -13,20 +16,21 @@ FILES = 3
 RAW_LINES = 42
 BLANK_LINES = 1
 HEADER_REPEAT = 1
-APPLIED = 27
+APPLIED = 24
 DUPLICATES = 2
-CONFLICTS = 3
+CONFLICTS = 6
 QUARANTINE = 10
 
 # ---- 水位 ----
 MAX_EVENT_TIME = "2026-11-15T09:02:00Z"
 WATERMARK = "2026-11-15T08:52:00Z"
 AS_OF = WATERMARK
-LATE_EVENTS = 9
-ON_TIME_EVENTS = 18
-LATE_12_MIN_REF = "events_main.jsonl:30"      # 08:40 到达，落后最大事件 720 秒
-LATE_12_MIN_SECONDS = 720
-BOUNDARY_REF = "events_main.jsonl:29"         # 08:52 恰等于 as_of，归快照一侧
+# 顺序无关口径：以批次最终水位 08:52 为唯一标尺，event_time 严格小于它即迟到。
+LATE_EVENTS = 22
+ON_TIME_EVENTS = 2
+LATE_12_MIN_REF = "events_main.jsonl:30"      # 08:40，落后最大事件(09:02) 22 分钟=1320 秒
+LATE_12_MIN_SECONDS = 1320
+BOUNDARY_REF = "events_main.jsonl:29"         # 08:52 恰等于水位，不迟到，归快照一侧
 
 # ---- 键账 ----
 KEYS_TOTAL = 19
@@ -52,6 +56,9 @@ SENTINEL_AMOUNT_KEY = ("refunds", "7001")      # 金额是 N/A 哨兵
 
 # ---- 冲突与隔离的具体行 ----
 VERSION_CONFLICT_REFS = ("events_main.jsonl:10", "events_main.jsonl:11")
+# 纯版本集合规则：两个墓碑键各自的全部低版本 upsert（不看到达先后）。
+RESURRECT_REFS = ("events_main.jsonl:2", "events_main.jsonl:7",
+                  "events_main.jsonl:25", "events_main.jsonl:33")
 RESURRECT_REF = "events_main.jsonl:33"
 DUP_REFS = ("events_main.jsonl:5", "events_main.jsonl:9")
 QUARANTINE_CODES = {
@@ -63,7 +70,7 @@ QUARANTINE_CODES = {
     "events_main.jsonl:19": "E_MISSING_KEY",
     "events_main.jsonl:23": "E_TYPE_MISMATCH",
     "events_main.jsonl:31": "E_BAD_JSON",
-    "events_main.jsonl:35": "E_TAIL_TRUNCATED",
+    "events_main.jsonl:35": "E_BAD_JSON",
     "events_v1_gb.csv:6": "E_COLUMN_COUNT",
 }
 
@@ -74,8 +81,9 @@ MAIN_DECLARED_ROWS = 34
 MAIN_ACTUAL_ROWS = 33
 
 # ---- 干净样例（同一条代码路径，无脏行）----
+# 最终水位 = 08:50 − 10 = 08:40；08:30、08:35 两条严格小于 08:40 记迟到，08:50 准时。
 CLEAN_SOURCE = "events_clean.jsonl"
 CLEAN_APPLIED = 3
-CLEAN_LATE = 0
+CLEAN_LATE = 2
 CLEAN_SNAPSHOT_KEYS = 2
 CLEAN_AS_OF = "2026-11-15T08:40:00Z"

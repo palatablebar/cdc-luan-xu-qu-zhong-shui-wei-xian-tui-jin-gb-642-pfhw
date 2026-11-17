@@ -1,9 +1,12 @@
 """冲突判定：同键同版本不同内容、墓碑后的低版本复活。
 
-两条规则都是集合性质，与遍历顺序无关（TRAP-19）：
+两条规则都是集合性质，与遍历/到达顺序无关（TRAP-19）：
 
 1. 版本冲突：按 (table, pk, version) 分组，组内出现两种以上签名 → 全组都不应用；
-2. 墓碑复活：先算每个键的最大删除版本，版本号更小的 upsert 一律不应用。
+2. 墓碑复活：某键存在版本 d 的 delete，则该键所有 version < d 的 upsert 一律不应用。
+   这是纯版本集合规则，不看谁先到谁后到，因此乱序重发判定恒定。语义上，低于删除
+   版本的 upsert 即使物理上先到，最终也会被同键高版本 delete 覆盖，折叠结果一致，
+   统一拦下不影响快照，反而让结果可长期复核。
 
 先判版本冲突再判墓碑，所以「一个被冲突排除的 delete」不会制造墓碑。
 """
@@ -11,6 +14,10 @@ from __future__ import annotations
 
 from ..m2_schema.service import Norm
 from . import dedup
+
+
+def _order(norm: Norm) -> int:
+    return norm.canonical_seq or norm.seq
 
 
 def group_key(norm: Norm) -> tuple[str, str, int]:
@@ -25,43 +32,34 @@ def version_conflicts(events: list[Norm]) -> list[Norm]:
     for items in groups.values():
         if len({dedup.signature(i) for i in items}) > 1:
             conflicted.extend(items)
-    return sorted(conflicted, key=lambda n: n.seq)
+    return sorted(conflicted, key=_order)
 
 
-def delete_marks(events: list[Norm]) -> dict[tuple[str, str], tuple[int, int]]:
-    """每个键：版本最高的 delete 的 (版本, 到达序号)。
-
-    到达序号用于区分「删除之前就到达的低版本」与「删除之后迟到到达的低版本」：
-    前者按版本顺序应用后会被删除覆盖，结果一致；后者试图复活，必须拦下。
-    """
-    out: dict[tuple[str, str], tuple[int, int]] = {}
+def max_delete_versions(events: list[Norm]) -> dict[tuple[str, str], int]:
+    """每个键：版本最高的 delete 的版本号。只看版本集合，与到达次序无关。"""
+    out: dict[tuple[str, str], int] = {}
     for norm in events:
         if norm.op != "delete" or norm.version is None:
             continue
         key = norm.key()
-        current = out.get(key)
-        if current is None or norm.version > current[0]:
-            out[key] = (norm.version, norm.seq)
+        if key not in out or norm.version > out[key]:
+            out[key] = norm.version
     return out
 
 
-def max_delete_versions(events: list[Norm]) -> dict[tuple[str, str], int]:
-    return {key: value[0] for key, value in delete_marks(events).items()}
-
-
 def tombstone_resurrections(events: list[Norm]) -> list[Norm]:
-    marks = delete_marks(events)
+    """同键存在版本 d 的 delete，则 version < d 的 upsert 一律判复活（顺序无关）。"""
+    marks = max_delete_versions(events)
     out = []
     for norm in events:
         if norm.op != "upsert" or norm.version is None:
             continue
-        mark = marks.get(norm.key())
-        if mark is None:
+        delete_version = marks.get(norm.key())
+        if delete_version is None:
             continue
-        delete_version, delete_seq = mark
-        if norm.version < delete_version and norm.seq > delete_seq:
+        if norm.version < delete_version:
             out.append(norm)
-    return sorted(out, key=lambda n: n.seq)
+    return sorted(out, key=_order)
 
 
 def conflict_detail(norm: Norm, peers: list[Norm]) -> str:
@@ -72,7 +70,7 @@ def conflict_detail(norm: Norm, peers: list[Norm]) -> str:
         return ""
     parts = []
     for other in others[:2]:
-        parts.append(f"{other.row_ref} 版本 {other.version} 内容不同")
+        parts.append(f"canonical_seq={_order(other)} 版本 {other.version} 内容不同")
     return "；".join(parts)
 
 

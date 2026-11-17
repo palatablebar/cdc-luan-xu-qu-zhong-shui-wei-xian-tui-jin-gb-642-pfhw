@@ -28,8 +28,9 @@ def digest_parts(parts: list[str]) -> str:
 def build(*, run_id: str, batch_id: str, batch_key: str, settings, source: str,
           input_digest: str, inputs: list[dict], params: dict, started_at: str,
           finished_at: str, elapsed_ms: int, stages: list[dict], counters: dict,
-          watermark: str, max_event_time: str, reconcile: dict) -> dict:
-    """清单是一份可独立复核的证据：输入摘要 + 参数 + 计数 + 对账身份。"""
+          watermark: str, max_event_time: str, reconcile: dict,
+          content_digest: str = "") -> dict:
+    """清单是一份可独立复核的证据：内容身份 + 输入字节证据 + 参数 + 计数 + 对账身份。"""
     return {
         "run_id": run_id,
         "batch_id": batch_id,
@@ -42,6 +43,15 @@ def build(*, run_id: str, batch_id: str, batch_key: str, settings, source: str,
         "timezone": "入库 UTC，页面按 Asia/Shanghai(+08:00)",
         "money": "金额 Decimal，单位元，最小刻度 0.01",
         "window": config.WINDOW_NOTE,
+        "content_digest": content_digest,
+        "identity_basis": (
+            "批次身份以 content_digest 为准：按每条采信行的规范化业务内容排序后哈希，"
+            "与文件名、行号、到达次序、物理字节无关；同一逻辑批次乱序重发只形成同一 batch_id。"
+        ),
+        "order_basis": (
+            "每行顺序依据为 canonical_seq（event_time→table→pk→version→op→内容哈希 的规范序），"
+            "去重首见、水位迟到、版本折叠、快照物化只认规范序；arrival_seq 为本次接收次序，仅作证据。"
+        ),
         "input_digest": input_digest,
         "inputs": inputs,
         "params": params,
@@ -51,5 +61,5 @@ def build(*, run_id: str, batch_id: str, batch_key: str, settings, source: str,
         "stages": stages,
         "counters": counters,
         "reconcile": reconcile,
-        "replayable": "同一 input_digest 重跑命中 batch_key，不新增行",
+        "replayable": "同一 content_digest 重跑命中 batch_key，不新增行、不重复累计",
     }

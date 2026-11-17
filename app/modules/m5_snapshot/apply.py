@@ -1,8 +1,8 @@
-"""应用：每个键按 (version, 到达序) 升序折叠成唯一状态。
+"""应用：每个键按 (version, 规范序) 升序折叠成唯一状态。
 
 规则：
 
-- 版本大的覆盖版本小的，与到达顺序无关；
+- 版本大的覆盖版本小的，与到达顺序无关；同版本并列时按 canonical_seq 取确定性末位；
 - delete 写墓碑（payload 清空，只留键与版本）；
 - 墓碑之后的低版本 upsert 已在 M3 判为冲突，这里不会出现，也不会复活；
 - 高版本 upsert 可以把墓碑改回活跃（正常重建，不算复活）。
@@ -30,6 +30,7 @@ class Applied:
     row_ref: str
     late: bool
     seq: int
+    canonical_seq: int = 0
 
     @property
     def key(self) -> tuple[str, str]:
@@ -44,7 +45,8 @@ class Applied:
         return cls(table=norm.table, pk=norm.pk, version=int(norm.version or 0),
                    op=norm.op or "upsert", payload=dict(norm.payload),
                    amount=norm.amount, qty=norm.qty, event_time=norm.event_time,
-                   row_ref=norm.row_ref, late=norm.late, seq=norm.seq)
+                   row_ref=norm.row_ref, late=norm.late, seq=norm.seq,
+                   canonical_seq=norm.canonical_seq or norm.seq)
 
     @classmethod
     def from_row(cls, row: dict) -> "Applied":
@@ -52,7 +54,8 @@ class Applied:
                    op=row["op"], payload=dict(row.get("payload") or {}),
                    amount=row.get("amount"), qty=row.get("qty"),
                    event_time=parse_iso(row["event_time_utc"]),
-                   row_ref=row["row_ref"], late=bool(row.get("late")), seq=row["seq"])
+                   row_ref=row["row_ref"], late=bool(row.get("late")), seq=row["seq"],
+                   canonical_seq=row.get("canonical_seq") or row["seq"])
 
     def as_dict(self) -> dict:
         return {
@@ -88,19 +91,24 @@ class KeyState:
         return self.state.tombstone
 
 
+def _order(item: Applied) -> int:
+    return item.canonical_seq or item.seq
+
+
 def build_states(applied: list[Applied]) -> dict[tuple[str, str], KeyState]:
     groups: dict[tuple[str, str], list[Applied]] = {}
     for item in applied:
         groups.setdefault(item.key, []).append(item)
     states: dict[tuple[str, str], KeyState] = {}
     for key, items in groups.items():
-        ordered = sorted(items, key=lambda e: (e.version, e.seq))
+        ordered = sorted(items, key=lambda e: (e.version, _order(e)))
         state = ordered[-1]
         if state.op == "delete":
             state = Applied(table=state.table, pk=state.pk, version=state.version,
                             op="delete", payload={}, amount=None, qty=None,
                             event_time=state.event_time, row_ref=state.row_ref,
-                            late=state.late, seq=state.seq)
+                            late=state.late, seq=state.seq,
+                            canonical_seq=_order(state))
         states[key] = KeyState(table=key[0], pk=key[1], state=state, events=ordered)
     return states
 

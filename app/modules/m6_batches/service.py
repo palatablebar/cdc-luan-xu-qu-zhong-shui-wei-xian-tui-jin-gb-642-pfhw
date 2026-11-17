@@ -10,6 +10,7 @@ import time
 from decimal import Decimal
 
 from ... import config, errors, manifest as manifest_mod, reasons
+from ..m1_events import identity
 from ..m1_events import service as m1_service
 from ..m2_schema import service as m2_service
 from ..m3_dedup import service as m3_service
@@ -78,15 +79,20 @@ def run(*, settings, store, source: str = "all", params: dict | None = None,
                          elapsed_ms=_ms(step),
                          note=f"{counts['files']} 个文件 / 空行 {counts['blank_lines']}"))
 
-    key = state.batch_key(bundle.input_digest, settings.rule_version, params)
-    batch_id = state.batch_id_for(key)
-    replay = resume.replay_of(store, key)
-    if replay is not None:
-        return _replay_payload(store, replay, key, run_id, stages)
+    # 批次身份在 M2 归一后由「业务内容摘要」决定（与字节/行序无关），此处先不按键查批次。
 
     # ---- M2 契约 ----
     step = time.perf_counter()
     norms = m2_service.normalize_rows(bundle.rows)
+    # 规范序在任何判定之前确定：所有折叠/迟到/快照只认 canonical_seq。
+    identity.assign_canonical_seq(norms)
+    content_digest = state.content_digest_of(norms)
+    key = state.batch_key(content_digest, settings.rule_version, params)
+    batch_id = state.batch_id_for(key)
+    # 相同业务内容（含乱序重发）命中已完成批次 → 幂等重放，零写入、不新增、不累计。
+    replay = resume.replay_of(store, key)
+    if replay is not None:
+        return _replay_payload(store, replay, key, run_id, stages)
     bad = [n for n in norms if n.errors]
     stages.append(_stage("contract", in_count=len(norms), out_count=len(norms) - len(bad),
                          quarantine=len(bad), elapsed_ms=_ms(step),
@@ -175,12 +181,14 @@ def run(*, settings, store, source: str = "all", params: dict | None = None,
         "batch_id": batch_id, "batch_key": key, "run_id": run_id,
         "source": bundle.source, "status": "done", "created_at": started_at,
         "finished_at": finished_at, "input_digest": bundle.input_digest,
+        "content_digest": content_digest,
         "watermark_utc": _iso(marks.final), "max_event_time": max_event,
         "params": params, "note": _batch_note(resume_of, marks.late), "replay_of": resume_of,
     }
     doc = manifest_mod.build(
         run_id=run_id, batch_id=batch_id, batch_key=key, settings=settings,
         source=bundle.source, input_digest=bundle.input_digest,
+        content_digest=content_digest,
         inputs=[_input_row(f) for f in bundle.files], params=params,
         started_at=started_at, finished_at=finished_at, elapsed_ms=elapsed,
         stages=[{"stage": s["stage"], "in": s["in_count"], "out": s["out_count"],

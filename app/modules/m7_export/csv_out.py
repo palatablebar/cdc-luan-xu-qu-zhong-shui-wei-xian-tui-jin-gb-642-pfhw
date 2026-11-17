@@ -10,7 +10,8 @@ import io
 
 BOM = "\ufeff"
 
-EVENT_COLUMNS = ("行号引用", "表", "主键", "版本", "操作", "事件时间(UTC)",
+EVENT_COLUMNS = ("行号引用", "规范序", "接收序", "顺序依据", "表", "主键", "版本", "操作",
+                 "事件时间(UTC)",
                  "原始时间", "schema", "分类", "原因码", "金额(元)", "数量",
                  "迟到", "明细")
 QUARANTINE_COLUMNS = ("行号引用", "表", "主键", "字段", "原值", "原因码", "明细",
@@ -37,7 +38,9 @@ def event_rows(rows: list[dict]) -> list[list]:
     out = []
     for row in rows:
         out.append([
-            row["row_ref"], row["table_name"], row["pk"], row["version"], row["op"],
+            row["row_ref"], row.get("canonical_seq", row["seq"]), row["seq"],
+            row.get("order_basis", ""),
+            row["table_name"], row["pk"], row["version"], row["op"],
             row["event_time_utc"], row.get("event_time_raw"), row.get("schema_version"),
             row["row_class"], row.get("reason_code") or "",
             "" if row.get("amount") is None else str(row["amount"]),

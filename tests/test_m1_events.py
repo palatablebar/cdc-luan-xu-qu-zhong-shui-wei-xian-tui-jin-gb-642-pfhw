@@ -55,12 +55,14 @@ def test_declared_rows_mismatch_marks_truncation():
     assert "E_TAIL_TRUNCATED" in item.note or "声明" in item.note
 
 
-def test_tail_unparsable_line_isolated_as_truncated():
-    """TRAP-16：末行只剩半个 JSON，按截断隔离而不是当有效事件。"""
+def test_tail_unparsable_line_isolated_as_bad_json():
+    """末行半截 JSON 按行级解析失败隔离（E_BAD_JSON）；与物理位置无关，乱序不漂移。
+    截断事实仍由文件级 E_TAIL_TRUNCATED（声明条数核对）保留。"""
     item = _file(X.MAIN_FILE)
     tail = item.rows[-1]
-    assert tail.error == "E_TAIL_TRUNCATED"
+    assert tail.error == "E_BAD_JSON"
     assert tail.raw is None
+    assert "E_TAIL_TRUNCATED" in item.codes
 
 
 def test_blank_line_counted_separately():

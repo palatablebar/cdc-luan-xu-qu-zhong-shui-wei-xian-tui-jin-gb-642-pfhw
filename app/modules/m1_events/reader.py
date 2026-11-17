@@ -102,8 +102,13 @@ def read_bytes(name: str, raw: bytes) -> FileRead:
 
 
 def _blank_lines(text: str) -> int:
-    rest, _meta, _c = fmt.split_comments(text)
-    return sum(1 for line in rest.splitlines() if not line.strip())
+    """空行计数与行序无关：统计全文所有空白行（注释行以 # 开头，不算空行）。
+
+    不能只看文件头之后的片段，否则空行一旦被乱序重发挪到注释行之前就会漏统，
+    导致同一批业务事实得到不同的 blank_lines。
+    """
+    return sum(1 for line in text.splitlines()
+               if not line.strip() and not line.lstrip().startswith("#"))
 
 
 def _dedup(codes: list[str]) -> list[str]:
@@ -139,12 +144,12 @@ def _read_jsonl(name: str, text: str, comment_lines: int) -> list[RawRow]:
             continue
         pending.append((lineno, line))
     for pos, (lineno, line) in enumerate(pending):
-        is_last = pos == len(pending) - 1
         try:
             raw = json.loads(line)
         except json.JSONDecodeError:
-            code = "E_TAIL_TRUNCATED" if is_last else "E_BAD_JSON"
-            rows.append(RawRow(file=name, lineno=lineno, text=line, error=code))
+            # 行级解析失败统一 E_BAD_JSON，与该行物理位置无关（末行/中段同一事实）。
+            # 「是否截断」由文件级声明条数核对另行判定，不随行序漂移。
+            rows.append(RawRow(file=name, lineno=lineno, text=line, error="E_BAD_JSON"))
             continue
         if not isinstance(raw, dict):
             rows.append(RawRow(file=name, lineno=lineno, text=line, error="E_BAD_JSON"))

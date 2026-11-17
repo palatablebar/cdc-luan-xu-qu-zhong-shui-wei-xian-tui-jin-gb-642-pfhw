@@ -40,6 +40,9 @@ class Norm:
     behind_seconds: int = 0
     row_class: str = ""
     reason_code: str | None = None
+    # 规范序：与物理行序无关的确定性次序，是所有折叠/迟到/快照判定的唯一顺序依据。
+    # seq（arrival_seq）只记录本次接收次序，作证据，不参与判定。
+    canonical_seq: int = 0
 
     @property
     def time_iso(self) -> str | None:
@@ -54,7 +57,10 @@ class Norm:
 
     def to_row(self) -> dict:
         return {
-            "row_ref": self.row_ref, "seq": self.seq, "table": self.table,
+            "row_ref": self.row_ref, "seq": self.seq,
+            "canonical_seq": self.canonical_seq or self.seq,
+            "order_basis": self.order_basis,
+            "table": self.table,
             "pk": self.pk, "version": self.version, "op": self.op,
             "event_time": self.time_iso, "event_time_raw": self.event_time_raw,
             "schema": self.schema, "payload": self.payload,
@@ -65,6 +71,13 @@ class Norm:
             "detail": self.detail or None, "late": self.late,
             "flags": self.codes, "raw_text": self.raw_text[:400],
         }
+
+    @property
+    def order_basis(self) -> str:
+        """每行标明顺序依据：判定走规范序，接收次序仅作证据。"""
+        return (f"canonical_seq={self.canonical_seq or self.seq}"
+                f"（event_time→table→pk→version→op→内容哈希）；"
+                f"arrival_seq={self.seq}（本次接收次序，仅证据）")
 
 
 def _payload_of(raw: dict) -> dict:

@@ -1,8 +1,11 @@
 """去重与冲突编排：按显式优先级把事件分成 已应用 / 重复 / 冲突 / 隔离。
 
-判定顺序（优先级）固定，且每一步都是集合运算，不依赖输入顺序：
+判定顺序（优先级）固定，且每一步都是集合运算，不依赖物理到达顺序：
 
     quarantine（契约不通过） > conflict（版本冲突/墓碑复活） > duplicate（同签名） > apply
+
+所有排序用 canonical_seq（规范序），保证同一批业务事实乱序重发时，分桶、原因码、
+首见保留与每行的顺序依据完全一致；arrival_seq 仅作证据保留。
 """
 from __future__ import annotations
 
@@ -13,6 +16,10 @@ from ..m2_schema.service import Norm, distribution
 from . import conflict, dedup
 
 PRIORITY = ("quarantine", "conflict", "duplicate", "apply")
+
+
+def _order(norm: Norm) -> int:
+    return norm.canonical_seq or norm.seq
 
 
 @dataclass
@@ -38,11 +45,11 @@ class Classification:
     @property
     def all_rows(self) -> list[Norm]:
         return sorted(self.applied + self.duplicates + self.conflicts + self.quarantine,
-                      key=lambda n: n.seq)
+                      key=_order)
 
 
 def classify(norms: list[Norm]) -> Classification:
-    ordered = sorted(norms, key=lambda n: n.seq)
+    ordered = sorted(norms, key=_order)
     result = Classification()
 
     quarantine = [n for n in ordered if n.errors]
@@ -68,10 +75,11 @@ def classify(norms: list[Norm]) -> Classification:
         norm.reason_code = "C_TOMBSTONE_RESURRECT"
         norm.detail = (
             f"版本 {norm.version} 小于该键删除版本 "
-            f"{conflict.max_delete_versions(live).get(norm.key(), 0)}")
+            f"{conflict.max_delete_versions(live).get(norm.key(), 0)}"
+            "（纯版本集合规则，与到达次序无关）")
         result.detail_of[norm.seq] = norm.detail
         in_conflict.append(norm)
-    result.conflicts = sorted(in_conflict, key=lambda n: n.seq)
+    result.conflicts = sorted(in_conflict, key=_order)
     conflict_seqs = {n.seq for n in result.conflicts}
 
     remaining = [n for n in live if n.seq not in conflict_seqs]
@@ -80,17 +88,17 @@ def classify(norms: list[Norm]) -> Classification:
         norm.row_class = "duplicate"
         norm.reason_code = dup_codes.get(norm.seq, "D_EXACT_DUP")
         first = dup_refs.get(norm.seq, "")
-        norm.detail = f"与首条 {first} 同签名"
+        norm.detail = f"与规范序首条（{first}）同签名"
         result.detail_of[norm.seq] = norm.detail
         result.ref_of[norm.seq] = first
-    result.duplicates = sorted(dups, key=lambda n: n.seq)
+    result.duplicates = sorted(dups, key=_order)
 
     for norm in kept:
         norm.row_class = "applied"
         norm.reason_code = None
         if norm.codes:
             result.detail_of[norm.seq] = "；".join(reasons.label(c) for c in norm.codes)
-    result.applied = sorted(kept, key=lambda n: n.seq)
+    result.applied = sorted(kept, key=_order)
     return result
 
 

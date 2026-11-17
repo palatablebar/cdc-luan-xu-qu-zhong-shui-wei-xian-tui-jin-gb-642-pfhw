@@ -96,7 +96,8 @@ def test_state_rows_versions(store, batch_id):
     target = rows["orders/1006"]
     assert target["versions"] == [1, 2, 3]
     assert target["events"] == 3
-    assert target["late"] == 1
+    # 三个版本 event_time（08:14/08:30/08:40）都早于最终水位 08:52，全部迟到。
+    assert target["late"] == 3
     assert target["version"] == 3
     assert target["amount"] == "61.00"
 

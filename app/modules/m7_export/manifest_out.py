@@ -19,7 +19,10 @@ def build(store, batch_id: str) -> dict:
         "timezone": "入库 UTC，页面按 Asia/Shanghai(+08:00)",
         "money": "金额 Decimal，单位元，最小刻度 0.01",
         "inputs": doc.get("inputs", []),
+        "content_digest": doc.get("content_digest") or batch.get("content_digest"),
         "input_digest": doc.get("input_digest") or batch.get("input_digest"),
+        "identity_basis": doc.get("identity_basis"),
+        "order_basis": doc.get("order_basis"),
         "params": doc.get("params", {}),
         "started_at": doc.get("started_at"),
         "finished_at": doc.get("finished_at"),
@@ -30,7 +33,7 @@ def build(store, batch_id: str) -> dict:
         "stages": doc.get("stages", _stages(store, batch_id)),
         "counters": doc.get("counters", store.load_totals(batch_id)),
         "reconcile": doc.get("reconcile", []),
-        "replayable": "同一 input_digest 重跑命中 batch_key，不新增行",
+        "replayable": "同一 content_digest 重跑命中 batch_key，不新增行、不重复累计",
     }
 
 
@@ -38,6 +41,7 @@ def _fallback(store, batch: dict) -> dict:
     return {
         "run_id": batch.get("run_id"),
         "batch_id": batch.get("batch_id"),
+        "content_digest": batch.get("content_digest"),
         "input_digest": batch.get("input_digest"),
         "inputs": store.load_inputs(batch.get("batch_id") or ""),
         "stages": _stages(store, batch.get("batch_id") or ""),

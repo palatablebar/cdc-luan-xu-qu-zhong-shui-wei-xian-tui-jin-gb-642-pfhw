@@ -21,7 +21,7 @@
     <div class="table-wrap">
       <table class="grid" data-sortable>
         <thead>
-          <tr><th>批次</th><th>运行号</th><th>来源</th><th>水位</th><th class="num">已应用</th><th class="num">重复</th><th class="num">冲突</th><th class="num">隔离</th><th class="num">迟到</th><th class="num">快照键</th><th>对账</th><th>输入摘要</th></tr>
+          <tr><th>批次</th><th>运行号</th><th>来源</th><th>水位</th><th class="num">已应用</th><th class="num">重复</th><th class="num">冲突</th><th class="num">隔离</th><th class="num">迟到</th><th class="num">快照键</th><th>对账</th><th title="批次身份依据：与字节/行序无关，乱序重发恒定">内容摘要</th><th title="物理证据：文件字节 sha256，仅取证不参与身份">字节摘要</th></tr>
         </thead>
         <tbody>
           {% for row in batches %}
@@ -37,7 +37,8 @@
             <td class="num">{{ row.counters.late_events | num }}</td>
             <td class="num">{{ row.counters.snapshot_keys | num }}</td>
             <td><span class="balance {% if not row.reconcile_ok %}is-bad{% endif %}">{{ "平" if row.reconcile_ok else "不平" }}</span></td>
-            <td class="mono">{{ row.input_digest | short }}</td>
+            <td class="mono" title="{{ row.content_digest }}">{{ row.content_digest | short }}</td>
+            <td class="mono" title="{{ row.input_digest }}">{{ row.input_digest | short }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -59,7 +60,9 @@
         <dt>批次</dt><dd>{{ batch.batch_id }}</dd>
         <dt>运行号</dt><dd>{{ batch.run_id }}</dd>
         <dt>批次键</dt><dd>{{ batch.batch_key }}</dd>
-        <dt>输入摘要</dt><dd>{{ batch.input_digest }}</dd>
+        <dt>内容摘要</dt><dd class="mono" title="批次身份依据：规范化业务内容，与字节/行序无关">{{ batch.content_digest }}</dd>
+        <dt>字节摘要</dt><dd class="mono" title="物理证据：文件字节 sha256，不参与身份">{{ batch.input_digest }}</dd>
+        <dt>顺序依据</dt><dd>判定用 canonical_seq 规范序；arrival_seq 接收序仅作证据</dd>
         <dt>水位</dt><dd>{{ batch.watermark_utc | localdt }}</dd>
         <dt>最大事件</dt><dd>{{ batch.max_event_time | localdt }}</dd>
         <dt>创建</dt><dd>{{ batch.created_at | localdt }}</dd>

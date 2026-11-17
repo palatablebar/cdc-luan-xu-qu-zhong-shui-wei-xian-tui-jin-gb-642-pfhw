@@ -21,15 +21,18 @@
       <table class="grid" data-sortable>
         <thead>
           <tr>
-            <th>#</th><th>行号引用</th><th>表</th><th>主键</th><th class="num">版本</th>
+            <th title="本次物理接收次序，仅作证据">接收序</th>
+            <th title="确定性规范序，所有判定的唯一顺序依据">规范序</th>
+            <th>行号引用</th><th>表</th><th>主键</th><th class="num">版本</th>
             <th>操作</th><th>事件时间</th><th>原始时间</th><th>schema</th>
             <th>分类</th><th>原因码</th><th class="num">金额(元)</th><th class="num">数量</th><th>迟到</th>
           </tr>
         </thead>
         <tbody>
           {% for e in events %}
-          <tr>
-            <td class="seq">{{ e.seq }}</td>
+          <tr title="{{ e.order_basis }}">
+            <td class="seq dim">{{ e.seq }}</td>
+            <td class="seq"><strong>{{ e.canonical_seq or e.seq }}</strong></td>
             <td class="mono nowrap">{{ e.row_ref }}</td>
             <td>{{ e.table_name or '—' }}</td>
             <td class="mono">{{ e.pk or '—' }}</td>

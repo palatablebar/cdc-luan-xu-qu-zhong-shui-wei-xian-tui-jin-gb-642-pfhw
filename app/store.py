@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS batches (
     created_at TEXT NOT NULL,
     finished_at TEXT,
     input_digest TEXT NOT NULL,
+    content_digest TEXT NOT NULL DEFAULT '',
     watermark_utc TEXT,
     max_event_time TEXT,
     params_json TEXT NOT NULL DEFAULT '{}',
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS inputs (
 );
 CREATE TABLE IF NOT EXISTS events (
     batch_id TEXT NOT NULL, row_ref TEXT NOT NULL, seq INTEGER NOT NULL,
+    canonical_seq INTEGER NOT NULL DEFAULT 0, order_basis TEXT NOT NULL DEFAULT '',
     table_name TEXT NOT NULL, pk TEXT NOT NULL, version INTEGER,
     op TEXT, event_time_utc TEXT, event_time_raw TEXT, schema_version TEXT,
     payload_json TEXT NOT NULL DEFAULT '{}', amount TEXT, qty INTEGER,
@@ -56,7 +58,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     payload_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS watermarks (
-    batch_id TEXT NOT NULL, seq INTEGER NOT NULL, row_ref TEXT NOT NULL,
+    batch_id TEXT NOT NULL, seq INTEGER NOT NULL, canonical_seq INTEGER NOT NULL DEFAULT 0,
+    row_ref TEXT NOT NULL,
     event_time_utc TEXT NOT NULL, watermark_utc TEXT NOT NULL,
     late INTEGER NOT NULL DEFAULT 0, behind_seconds INTEGER NOT NULL DEFAULT 0
 );
@@ -81,11 +84,20 @@ class Store:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
             self._ensure_columns(conn)
+            # 内容索引依赖 content_digest 列，必须在轻量迁移补列之后再建（兼容老库）。
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_batches_content "
+                         "ON batches(content_digest)")
 
     @staticmethod
     def _ensure_columns(conn) -> None:
         """轻量迁移：老库缺列时补上，避免升级后 500。"""
-        wanted = {"inputs": {"declared": "TEXT"}}
+        wanted = {
+            "inputs": {"declared": "TEXT"},
+            "batches": {"content_digest": "TEXT NOT NULL DEFAULT ''"},
+            "events": {"canonical_seq": "INTEGER NOT NULL DEFAULT 0",
+                       "order_basis": "TEXT NOT NULL DEFAULT ''"},
+            "watermarks": {"canonical_seq": "INTEGER NOT NULL DEFAULT 0"},
+        }
         for table, columns in wanted.items():
             existing = {row["name"] for row in conn.execute(
                 f"PRAGMA table_info({table})").fetchall()}
@@ -154,11 +166,15 @@ class Store:
                      item.get("code"), item.get("note", ""), item.get("lines", 0)))
             for row in events:
                 conn.execute(
-                    """INSERT INTO events (batch_id,row_ref,seq,table_name,pk,version,op,
+                    """INSERT INTO events (batch_id,row_ref,seq,canonical_seq,order_basis,
+                        table_name,pk,version,op,
                         event_time_utc,event_time_raw,schema_version,payload_json,amount,qty,
                         row_class,reason_code,field,raw_value,detail,late,flags_json,raw_text)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (batch["batch_id"], row["row_ref"], row["seq"], row["table"], row["pk"],
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (batch["batch_id"], row["row_ref"], row["seq"],
+                     row.get("canonical_seq", row["seq"]),
+                     row.get("order_basis", ""),
+                     row["table"], row["pk"],
                      row.get("version"), row.get("op"), row.get("event_time"),
                      row.get("event_time_raw"), row.get("schema"),
                      json.dumps(row.get("payload", {}), ensure_ascii=False,
@@ -181,9 +197,11 @@ class Store:
                      json.dumps(s.get("payload", {}), ensure_ascii=False, default=str)))
             for w in watermarks:
                 conn.execute(
-                    """INSERT INTO watermarks (batch_id,seq,row_ref,event_time_utc,
-                        watermark_utc,late,behind_seconds) VALUES (?,?,?,?,?,?,?)""",
-                    (batch["batch_id"], w["seq"], w["row_ref"], w["event_time"],
+                    """INSERT INTO watermarks (batch_id,seq,canonical_seq,row_ref,
+                        event_time_utc,watermark_utc,late,behind_seconds)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (batch["batch_id"], w["seq"], w.get("canonical_seq", w["seq"]),
+                     w["row_ref"], w["event_time"],
                      w["watermark"], 1 if w.get("late") else 0, w.get("behind_seconds", 0)))
             for s in stages:
                 conn.execute(
@@ -200,17 +218,19 @@ class Store:
                 (batch["batch_id"], json.dumps(manifest, ensure_ascii=False, default=str)))
             conn.execute(
                 """INSERT INTO batches (batch_id,batch_key,run_id,source,status,created_at,
-                        finished_at,input_digest,watermark_utc,max_event_time,params_json,
-                        note,replay_of)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        finished_at,input_digest,content_digest,watermark_utc,max_event_time,
+                        params_json,note,replay_of)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(batch_id) DO UPDATE SET
                      status=excluded.status, finished_at=excluded.finished_at,
                      note=excluded.note, input_digest=excluded.input_digest,
+                     content_digest=excluded.content_digest,
                      watermark_utc=excluded.watermark_utc,
                      max_event_time=excluded.max_event_time""",
                 (batch["batch_id"], batch["batch_key"], batch["run_id"], batch["source"],
                  batch["status"], batch["created_at"], batch.get("finished_at"),
-                 batch["input_digest"], batch.get("watermark_utc"),
+                 batch["input_digest"], batch.get("content_digest", ""),
+                 batch.get("watermark_utc"),
                  batch.get("max_event_time"),
                  json.dumps(batch.get("params", {}), ensure_ascii=False),
                  batch.get("note", ""), batch.get("replay_of")))
@@ -242,15 +262,16 @@ class Store:
         with self.connect() as conn:
             conn.execute(
                 """INSERT INTO batches (batch_id,batch_key,run_id,source,status,created_at,
-                        finished_at,input_digest,watermark_utc,max_event_time,params_json,
-                        note,replay_of)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        finished_at,input_digest,content_digest,watermark_utc,max_event_time,
+                        params_json,note,replay_of)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(batch_id) DO UPDATE SET
                      status=excluded.status, finished_at=excluded.finished_at,
                      note=excluded.note""",
                 (batch["batch_id"], batch["batch_key"], batch["run_id"], batch["source"],
                  batch["status"], batch["created_at"], batch.get("finished_at"),
-                 batch["input_digest"], batch.get("watermark_utc"),
+                 batch["input_digest"], batch.get("content_digest", ""),
+                 batch.get("watermark_utc"),
                  batch.get("max_event_time"),
                  json.dumps(batch.get("params", {}), ensure_ascii=False),
                  note or batch.get("note", ""), batch.get("replay_of")))

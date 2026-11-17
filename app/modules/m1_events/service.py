@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ... import config, errors
-from . import reader
+from . import identity, reader
 
 
 @dataclass
@@ -22,8 +22,14 @@ class IngestBundle:
 
     @property
     def input_digest(self) -> str:
+        """物理证据摘要：每个文件 name:字节sha256。只证明「收到哪些字节」，不参与批次身份。"""
         from ... import manifest
         return manifest.digest_parts([f"{f.name}:{f.sha256}" for f in self.files])
+
+    @property
+    def content_digest(self) -> str:
+        """业务内容摘要：与文件名、行号、到达次序、物理字节都无关，是批次身份的依据。"""
+        return identity.digest_of_raw_rows(self.rows)
 
 
 def resolve_files(settings, source: str) -> list[str]:

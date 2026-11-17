@@ -11,7 +11,7 @@ docker compose exec -T app python -m pytest -q
 ```
 
 首次启动会用 `sample_data/` 的三个文件跑一次采信（`app/bootstrap.py`），页面直接有数据；
-重复启动命中批次键，走幂等重放。
+重复启动或同一逻辑批次乱序重发都命中同一内容批次键，走幂等重放，不新增行、不累计。
 
 ## 2 主流程（页面）
 
@@ -19,7 +19,8 @@ docker compose exec -T app python -m pytest -q
 2. `/events` 按分类筛选，确认每行的行号引用与原因码；
 3. `/conflicts` 看冲突分组与隔离区，导出隔离 CSV；
 4. `/snapshot` 点「物化」，核对三条对账；
-5. `/batches` 看 `run_id`、输入 sha256 与阶段耗时，导出运行清单。
+5. `/batches` 看 `run_id`、内容摘要（批次身份）、输入字节 sha256（证据）与阶段耗时，导出运行清单；
+   事件流每行可看 `canonical_seq`（判定用规范序）与接收序（仅证据）。
 
 ## 3 主流程（命令）
 
@@ -36,7 +37,7 @@ curl -s -o /tmp/snapshot.csv    "$BASE/api/export/snapshot.csv"
 curl -s -o /tmp/manifest.json   "$BASE/api/export/manifest.json"
 ```
 
-判定看数字：行账 42 = 27 + 2 + 3 + 10；键账 19 = 18 + 1；金额 1552.51 + 200.00 + 0.00 = 1752.51。
+判定看数字：行账 42 = 24 + 2 + 6 + 10；键账 19 = 18 + 1；金额 1552.51 + 200.00 + 0.00 = 1752.51。
 
 ## 4 失败处置
 
@@ -68,8 +69,9 @@ python -m pytest -q
 
 ## 6 导出复核
 
-- `events.csv`：42 行，含 `行号引用`、`原因码`、`分类`、`迟到`；
+- `events.csv`：42 行，含 `行号引用`、`规范序`、`接收序`、`顺序依据`、`原因码`、`分类`、`迟到`；
 - `quarantine.csv`：10 行，含 `字段`、`原值`、`原始文本`；
-- `conflicts.csv`：3 行，含两条证据行引用；
+- `conflicts.csv`：6 行（版本冲突 2 + 墓碑复活 4），证据用稳定的规范序位次；
 - `snapshot.csv` / `snapshot.json`：18 键，活跃 16、墓碑 2；
-- `manifest.json`：`run_id`、每个输入的 sha256、阶段耗时、四账。
+- `manifest.json`：`run_id`、`content_digest`（批次身份）、每个输入的字节 sha256（证据）、
+  `identity_basis`、`order_basis`、阶段耗时、四账。

@@ -10,10 +10,13 @@ def _by_ref(rows, ref):
 
 
 def test_exact_duplicate_keeps_first(store, batch_id):
+    """重复行的证据引用用稳定的规范序位次，不含会漂移的物理行号。"""
     rows = store.load_events(batch_id, "duplicate")
     first = _by_ref(rows, "events_main.jsonl:5")
     assert first["reason_code"] == "D_EXACT_DUP"
-    assert first["detail"].endswith("events_main.jsonl:4 同签名")
+    assert "同签名" in first["detail"]
+    assert "canonical_seq=" in first["detail"]
+    assert "events_main.jsonl:" not in first["detail"]
     assert len(rows) == X.DUPLICATES
 
 
@@ -41,12 +44,20 @@ def test_tombstone_after_delete_conflicts(store, batch_id):
     assert "删除版本" in row["detail"]
 
 
-def test_low_version_before_delete_still_applies(store, batch_id):
-    """删除之前到达的低版本按版本序应用，最后被墓碑覆盖，不算复活。"""
-    applied = [r for r in store.load_events(batch_id, "applied")
-               if r["table_name"] == "orders" and r["pk"] == "1001"]
-    assert sorted(r["version"] for r in applied) == [1, 2, 3]
-    assert [r["op"] for r in applied if r["version"] == 3] == ["delete"]
+def test_low_version_before_delete_pure_version_rule(store, batch_id):
+    """纯版本集合规则：键存在版本 d 的 delete，所有 version<d 的 upsert 都判复活，
+    不看到达先后；应用侧只剩墓碑，快照结果与旧口径一致。"""
+    conflicts = store.load_events(batch_id, "conflict")
+    resurrect = sorted((r["pk"], r["version"]) for r in conflicts
+                       if r["reason_code"] == "C_TOMBSTONE_RESURRECT")
+    assert ("1001", 1) in resurrect and ("1001", 2) in resurrect
+    assert ("1012", 1) in resurrect and ("1012", 2) in resurrect
+    applied_1001 = [r for r in store.load_events(batch_id, "applied")
+                    if r["table_name"] == "orders" and r["pk"] == "1001"]
+    assert [(r["version"], r["op"]) for r in applied_1001] == [(3, "delete")]
+    snap = next(r for r in store.load_snapshot(batch_id)
+                if r["table_name"] == "orders" and r["pk"] == "1001")
+    assert snap["op"] == "delete" and snap["amount"] is None
 
 
 def test_conflict_beats_duplicate(norm_factory):
@@ -114,6 +125,34 @@ def test_conflict_group_diff_and_distribution(store, batch_id):
     dist = service.distribution_from_rows(rows_all)
     mapping = {row["code"]: row["count"] for row in dist}
     assert mapping["C_VERSION_CONFLICT"] == 2
-    assert mapping["C_TOMBSTONE_RESURRECT"] == 1
+    assert mapping["C_TOMBSTONE_RESURRECT"] == 4
     assert mapping["E_BAD_TIME"] == 1
     assert [row["bucket"] for row in service.rule_table()] == list(service.PRIORITY)
+
+
+def test_tombstone_rule_independent_of_arrival_order(norm_factory):
+    """同一批事实：低版本 upsert 放在 delete 之前或之后，复活判定完全一致。"""
+    norms = [
+        norm_factory(pk="77", version=1, op="upsert",
+                     event_time="2026-11-15T08:00:00Z",
+                     payload={"status": "A", "amount": "5.00"}),
+        norm_factory(pk="77", version=2, op="upsert",
+                     event_time="2026-11-15T08:05:00Z",
+                     payload={"status": "A", "amount": "5.00"}),
+        norm_factory(pk="77", version=3, op="delete",
+                     event_time="2026-11-15T08:10:00Z",
+                     payload={"status": "A", "amount": "5.00"}),
+    ]
+    # 反转物理接收次序（同一批对象，业务内容不变）。
+    for index, norm in enumerate(reversed(norms), 1):
+        norm.seq = index
+    forward = service.classify(list(norms))
+    backward = service.classify(list(reversed(norms)))
+
+    def by_version(result):
+        return {n.version: n.reason_code for n in result.all_rows}
+
+    assert by_version(forward) == by_version(backward)
+    assert sorted(n.version for n in forward.conflicts) == [1, 2]
+    assert [n.version for n in forward.applied] == [3]
+    assert forward.applied[0].op == "delete"
